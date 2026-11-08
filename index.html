@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartRoute · Planificación de rutas de distribución</title>
+  <meta name="description" content="SmartRoute: prototipo demostrativo de una plataforma web para planificar rutas de distribución en Riohacha, La Guajira.">
+
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap 5, Bootstrap Icons y Leaflet (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"> <!-- respaldo si el primer CDN falla -->
+
+  <!-- Estilos propios -->
+  <link href="css/styles.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-logo"><i class="bi bi-geo-alt-fill"></i></span>
+      <div>
+        <div class="brand-name">SmartRoute</div>
+        <div class="brand-tag">Rutas de distribución</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" id="menuLateral">
+      <a href="#dashboard" class="nav-item-sr" data-seccion="dashboard"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span></a>
+      <a href="#pedidos" class="nav-item-sr" data-seccion="pedidos"><i class="bi bi-box-seam-fill"></i><span>Pedidos</span><span class="nav-badge d-none" id="badgePedidos">0</span></a>
+      <a href="#rutas" class="nav-item-sr" data-seccion="rutas"><i class="bi bi-signpost-split-fill"></i><span>Planificador de rutas</span></a>
+      <a href="#vehiculos" class="nav-item-sr" data-seccion="vehiculos"><i class="bi bi-truck"></i><span>Vehículos</span></a>
+      <a href="#clientes" class="nav-item-sr" data-seccion="clientes"><i class="bi bi-people-fill"></i><span>Clientes</span></a>
+      <a href="#reportes" class="nav-item-sr" data-seccion="reportes"><i class="bi bi-bar-chart-line-fill"></i><span>Reportes</span></a>
+      <a href="#configuracion" class="nav-item-sr" data-seccion="configuracion"><i class="bi bi-gear-fill"></i><span>Configuración</span></a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="demo-pill"><i class="bi bi-mortarboard-fill me-1"></i>Proyecto académico</div>
+      <div class="small mt-2 opacity-75">Ingeniería de Sistemas · Prototipo demostrativo</div>
+      <div class="small opacity-75">Riohacha, La Guajira</div>
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ================= CONTENIDO ================= -->
+  <div class="main-wrap">
+
+    <!-- Barra superior -->
+    <header class="topbar">
+      <button class="btn btn-icon d-lg-none" id="btnMenu" aria-label="Abrir menú"><i class="bi bi-list fs-4"></i></button>
+      <h1 class="topbar-title" id="tituloSeccion">Dashboard</h1>
+
+      <div class="topbar-search">
+        <i class="bi bi-search"></i>
+        <input type="search" class="form-control" id="buscadorGlobal" placeholder="Buscar pedidos, clientes o vehículos..." autocomplete="off">
+      </div>
+
+      <div class="topbar-actions">
+        <div class="dropdown">
+          <button class="btn btn-icon position-relative" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-label="Notificaciones" id="btnNotificaciones">
+            <i class="bi bi-bell-fill"></i>
+            <span class="notif-dot d-none" id="notifDot">0</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end notif-menu p-0" id="menuNotificaciones"></div>
+        </div>
+
+        <div class="user-box">
+          <div class="user-avatar" id="avatarUsuario">AD</div>
+          <div class="user-info d-none d-md-block">
+            <div class="user-name" id="nombreUsuario">Administrador</div>
+            <div class="user-role">Administrador</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Contenido dinámico (SPA) -->
+    <main class="content" id="contenido" tabindex="-1"></main>
+
+    <footer class="app-footer">
+      SmartRoute &copy; 2026 · Sistema demostrativo de logística para pequeñas empresas · Riohacha, La Guajira, Colombia
+    </footer>
+  </div>
+
+  <!-- ================= MODAL GENERAL (formularios) ================= -->
+  <div class="modal fade" id="modalGeneral" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" id="modalGeneralDialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalGeneralTitulo"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body" id="modalGeneralCuerpo"></div>
+        <div class="modal-footer" id="modalGeneralPie">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary" form="formModal" id="modalGeneralGuardar">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL DE CONFIRMACIÓN ================= -->
+  <div class="modal fade" id="modalConfirmar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content">
+        <div class="modal-body text-center p-4">
+          <div class="confirm-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+          <h5 class="mt-3 mb-2" id="confirmarTitulo">¿Confirmar acción?</h5>
+          <p class="text-muted mb-4" id="confirmarMensaje"></p>
+          <div class="d-flex gap-2 justify-content-center">
+            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+            <button type="button" class="btn btn-danger" id="confirmarAceptar">Eliminar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NOTIFICACIONES (toasts) ================= -->
+  <div class="toast-container position-fixed top-0 end-0 p-3" id="contenedorToasts" style="z-index:2000"></div>
+
+  <!-- Librerías (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>window.Chart || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script>');</script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>window.L || document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');</script>
+
+  <!-- Código de la aplicación (el orden importa) -->
+  <script src="js/data.js"></script>
+  <script src="js/routes.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
