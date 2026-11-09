@@ -14,6 +14,11 @@
    calles y medir su distancia; no se usa para optimizar el orden.
    ========================================================================== */
 
+/* Escapa texto para insertarlo de forma segura en HTML (popups y SVG) */
+const escHtml = s => String(s === undefined || s === null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 const Rutas = {
   mapa: null,            // instancia de Leaflet
   capaRuta: null,        // grupo de capas (marcadores + línea)
@@ -29,6 +34,11 @@ const Rutas = {
   VELOCIDAD_KMH: 25,
   MIN_POR_PARADA: 4,
   FACTOR_CALLES: 1.3,    // la distancia real por calles es mayor que la línea recta
+
+  /* Límites para que la página siga fluida con muchos datos */
+  MAX_MARCADORES_PENDIENTES: 500, // puntos que se dibujan cuando aún no hay ruta
+  OSRM_PUNTOS_POR_TRAMO: 50,      // el servicio público limita los puntos por consulta
+  OSRM_MAX_TRAMOS: 4,             // si hay más paradas, se usa la estimación en línea recta
 
   /* Proveedores de mosaicos (ninguno requiere clave). Se prueban en este orden. */
   PROVEEDORES: [
@@ -68,12 +78,14 @@ const Rutas = {
   },
 
   /* Coordenadas de un pedido según su sector (con un pequeño desplazamiento
-     determinista para que pedidos del mismo sector no queden superpuestos) */
+     determinista para que pedidos del mismo sector no queden superpuestos).
+     Se usan más posiciones posibles (23 x 23) para que, con muchos pedidos en
+     un mismo barrio, se repitan lo menos posible. */
   ubicacionDePedido(pedido) {
     const base = SECTORES[pedido.sector] || { lat: BODEGA.lat, lng: BODEGA.lng };
     const num = parseInt(String(pedido.id).replace(/\D/g, ''), 10) || 0;
-    const dLat = (((num * 7) % 11) - 5) * 0.00016;
-    const dLng = (((num * 13) % 11) - 5) * 0.00016;
+    const dLat = (((num * 7) % 23) - 11) * 0.00014;
+    const dLng = (((num * 13 + Math.floor(num / 23)) % 23) - 11) * 0.00014;
     return { lat: base.lat + dLat, lng: base.lng + dLng };
   },
 
@@ -122,12 +134,8 @@ const Rutas = {
     return { orden, distanciaKm, tiempoMin, carga, vehiculo, calles: null };
   },
 
-  /* Consulta opcional al servicio público OSRM para trazar el recorrido por calles.
-     Devuelve { coords, km, min } o null si no hay conexión / el servicio no responde.
-     Solo traza el recorrido: el ORDEN de las paradas sigue siendo el de la heurística. */
-  async rutaPorCalles(resultado) {
-    if (!resultado || !resultado.orden || typeof fetch === 'undefined') return null;
-    const puntos = [BODEGA].concat(resultado.orden.map(pt => pt.ubicacion), [BODEGA]);
+  /* Una consulta a OSRM para un tramo de puntos. Devuelve { coords, metros, segundos } o null. */
+  async consultarTramoOSRM(puntos) {
     const coords = puntos.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
     const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
 
@@ -141,14 +149,46 @@ const Rutas = {
       const ruta = json.routes[0];
       return {
         coords: ruta.geometry.coordinates.map(c => [c[1], c[0]]),
-        km: Math.round(ruta.distance / 100) / 10,
-        min: Math.max(1, Math.round(ruta.duration / 60))
+        metros: ruta.distance,
+        segundos: ruta.duration
       };
     } catch (e) {
       return null;
     } finally {
       clearTimeout(limite);
     }
+  },
+
+  /* Consulta opcional al servicio público OSRM para trazar el recorrido por calles.
+     Con muchas paradas divide el recorrido en tramos (el servicio público limita
+     la cantidad de puntos por consulta) y los une.
+     Devuelve { coords, km, min } o null si no hay conexión / el servicio no responde.
+     Solo traza el recorrido: el ORDEN de las paradas sigue siendo el de la heurística. */
+  async rutaPorCalles(resultado) {
+    if (!resultado || !resultado.orden || typeof fetch === 'undefined') return null;
+    const puntos = [BODEGA].concat(resultado.orden.map(pt => pt.ubicacion), [BODEGA]);
+
+    // Tramos que comparten su punto de unión
+    const tamano = this.OSRM_PUNTOS_POR_TRAMO;
+    const tramos = [];
+    for (let i = 0; i < puntos.length - 1; i += tamano - 1) {
+      tramos.push(puntos.slice(i, Math.min(i + tamano, puntos.length)));
+    }
+    if (tramos.length > this.OSRM_MAX_TRAMOS) return null;
+
+    let coords = [], metros = 0, segundos = 0;
+    for (let t = 0; t < tramos.length; t++) {
+      const r = await this.consultarTramoOSRM(tramos[t]);
+      if (!r) return null;
+      coords = coords.concat(t === 0 ? r.coords : r.coords.slice(1));
+      metros += r.metros;
+      segundos += r.segundos;
+    }
+    return {
+      coords,
+      km: Math.round(metros / 100) / 10,
+      min: Math.max(1, Math.round(segundos / 60))
+    };
   },
 
   /* ---------- Mapa ---------- */
@@ -180,6 +220,15 @@ const Rutas = {
     }
   },
 
+  /* Programa la revisión: si el proveedor activo no cargó nada, se pasa al siguiente */
+  vigilarMosaicos(cont) {
+    clearTimeout(this.temporizadorMosaicos);
+    this.temporizadorMosaicos = setTimeout(() => {
+      const activa = this.capasBase[this.indiceBase];
+      if (activa && activa._sr.cargados === 0) this.siguienteProveedor(cont);
+    }, 7000);
+  },
+
   /* Crea las capas de mosaicos, el control para cambiarlas y el cambio automático */
   iniciarMosaicos(cont) {
     const aviso = document.getElementById('avisoMapaOffline');
@@ -206,12 +255,20 @@ const Rutas = {
     this.capasBase[0].addTo(this.mapa);
     L.control.layers(base, null, { position: 'topright', collapsed: true }).addTo(this.mapa);
 
+    // Si la persona cambia de proveedor a mano, ese pasa a ser el proveedor activo
+    this.mapa.on('baselayerchange', ev => {
+      if (ev.layer && ev.layer._sr) {
+        this.indiceBase = ev.layer._sr.indice;
+        ev.layer._sr.errores = 0;
+        cont.classList.remove('sr-sin-mosaicos');
+        const av = document.getElementById('avisoMapaOffline');
+        if (av) av.classList.add('d-none');
+        this.vigilarMosaicos(cont);
+      }
+    });
+
     // Si pasados unos segundos no ha cargado nada (bloqueo silencioso), también se cambia
-    clearTimeout(this.temporizadorMosaicos);
-    this.temporizadorMosaicos = setTimeout(() => {
-      const activa = this.capasBase[this.indiceBase];
-      if (activa && activa._sr.cargados === 0) this.siguienteProveedor(cont);
-    }, 7000);
+    this.vigilarMosaicos(cont);
   },
 
   siguienteProveedor(cont) {
@@ -228,11 +285,7 @@ const Rutas = {
     this.indiceBase = siguiente;
     if (anterior && this.mapa.hasLayer(anterior)) this.mapa.removeLayer(anterior);
     this.capasBase[siguiente].addTo(this.mapa);
-    clearTimeout(this.temporizadorMosaicos);
-    this.temporizadorMosaicos = setTimeout(() => {
-      const activa = this.capasBase[this.indiceBase];
-      if (activa && activa._sr.cargados === 0) this.siguienteProveedor(cont);
-    }, 7000);
+    this.vigilarMosaicos(cont);
   },
 
   destruirMapa() {
@@ -270,7 +323,7 @@ const Rutas = {
 
     // Marcador de la bodega
     L.marker([BODEGA.lat, BODEGA.lng], { icon: this.crearIcono('<i class="bi bi-house-door-fill"></i>', '#14213D') })
-      .bindPopup(`<strong>${BODEGA.nombre}</strong><br>Punto de partida y regreso`)
+      .bindPopup(`<strong>${escHtml(BODEGA.nombre)}</strong><br>Punto de partida y regreso`)
       .addTo(this.capaRuta);
 
     if (resultado && resultado.orden) {
@@ -279,7 +332,7 @@ const Rutas = {
         const color = this.COLORES[i % this.COLORES.length];
         const p = pt.pedido;
         L.marker([pt.ubicacion.lat, pt.ubicacion.lng], { icon: this.crearIcono(i + 1, color) })
-          .bindPopup(`<strong>Parada ${i + 1}: ${p.cliente}</strong><br>${p.direccion}, ${p.sector}<br>${p.producto} · ${p.cantidad} uds.`)
+          .bindPopup(`<strong>Parada ${i + 1}: ${escHtml(p.cliente)}</strong><br>${escHtml(p.direccion)}, ${escHtml(p.sector)}<br>${escHtml(p.producto)} · ${escHtml(p.cantidad)} uds.`)
           .addTo(this.capaRuta);
         coords.push([pt.ubicacion.lat, pt.ubicacion.lng]);
         limites.push([pt.ubicacion.lat, pt.ubicacion.lng]);
@@ -288,18 +341,18 @@ const Rutas = {
       if (resultado.calles && resultado.calles.coords.length > 1) {
         // Recorrido por calles (OSRM): línea continua que sigue las vías
         const linea = L.polyline(resultado.calles.coords, { color: '#2563EB', weight: 5, opacity: 0.85 }).addTo(this.capaRuta);
-        linea.getBounds().isValid() && limites.push(linea.getBounds().getNorthEast(), linea.getBounds().getSouthWest());
+        if (linea.getBounds().isValid()) limites.push(linea.getBounds().getNorthEast(), linea.getBounds().getSouthWest());
       } else {
         // Sin servicio de calles: líneas rectas entre paradas y regreso punteado
         L.polyline(coords, { color: '#2563EB', weight: 5, opacity: 0.85 }).addTo(this.capaRuta);
         L.polyline([coords[coords.length - 1], coords[0]], { color: '#64748B', weight: 3, opacity: 0.7, dashArray: '8 8' }).addTo(this.capaRuta);
       }
     } else {
-      // Sin ruta: se muestran los pedidos pendientes como puntos
-      (pedidosPendientes || []).forEach((p, i) => {
+      // Sin ruta: se muestran los pedidos pendientes como puntos (con un tope para no saturar el mapa)
+      (pedidosPendientes || []).slice(0, this.MAX_MARCADORES_PENDIENTES).forEach((p, i) => {
         const u = this.ubicacionDePedido(p);
         L.marker([u.lat, u.lng], { icon: this.crearIcono(i + 1, this.COLORES[i % this.COLORES.length]) })
-          .bindPopup(`<strong>${p.cliente}</strong><br>${p.direccion}, ${p.sector}<br>${p.producto} · ${p.cantidad} uds.`)
+          .bindPopup(`<strong>${escHtml(p.cliente)}</strong><br>${escHtml(p.direccion)}, ${escHtml(p.sector)}<br>${escHtml(p.producto)} · ${escHtml(p.cantidad)} uds.`)
           .addTo(this.capaRuta);
         limites.push([u.lat, u.lng]);
       });
@@ -318,8 +371,10 @@ const Rutas = {
     if (resultado && resultado.orden) {
       resultado.orden.forEach((pt, i) => items.push({ ...pt.ubicacion, etiqueta: String(i + 1), nombre: pt.pedido.cliente, color: this.COLORES[i % this.COLORES.length] }));
     } else {
-      (pedidosPendientes || []).forEach((p, i) => items.push({ ...this.ubicacionDePedido(p), etiqueta: String(i + 1), nombre: p.cliente, color: this.COLORES[i % this.COLORES.length] }));
+      (pedidosPendientes || []).slice(0, this.MAX_MARCADORES_PENDIENTES).forEach((p, i) => items.push({ ...this.ubicacionDePedido(p), etiqueta: String(i + 1), nombre: p.cliente, color: this.COLORES[i % this.COLORES.length] }));
     }
+    // Con muchos puntos, los nombres se omiten para que el dibujo siga siendo legible
+    const mostrarNombres = items.length <= 30;
 
     const todos = [{ lat: BODEGA.lat, lng: BODEGA.lng }].concat(items);
     const lats = todos.map(t => t.lat), lngs = todos.map(t => t.lng);
@@ -344,7 +399,8 @@ const Rutas = {
     items.forEach(t => {
       svg += `<g><circle cx="${px(t.lng)}" cy="${py(t.lat)}" r="14" fill="${t.color}" stroke="#fff" stroke-width="3"/>` +
              `<text x="${px(t.lng)}" y="${py(t.lat) + 5}" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">${t.etiqueta}</text>` +
-             `<text x="${px(t.lng)}" y="${py(t.lat) - 20}" text-anchor="middle" fill="#14213D" font-size="12">${t.nombre}</text></g>`;
+             (mostrarNombres ? `<text x="${px(t.lng)}" y="${py(t.lat) - 20}" text-anchor="middle" fill="#14213D" font-size="12">${escHtml(t.nombre)}</text>` : '') +
+             `</g>`;
     });
     svg += '</svg>';
 

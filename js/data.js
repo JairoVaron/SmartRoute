@@ -413,7 +413,7 @@ function crearDatosDemo() {
     nuevoPedido(1025, 'C046', 'Pendiente', 'Víveres secos', 25, 0),
     nuevoPedido(1026, 'C047', 'Pendiente', 'Ingredientes de cocina', 10, 0),
     nuevoPedido(1027, 'C048', 'Pendiente', 'Artículos de hogar', 14, 0),
-    // Pedidos en ruta
+    // Pedidos en ruta (pertenecen a la ruta R-002)
     nuevoPedido(1028, 'C049', 'En ruta', 'Cajas de cartón', 16, 0),
     nuevoPedido(1029, 'C050', 'En ruta', 'Gaseosas', 20, 0),
     nuevoPedido(1030, 'C051', 'En ruta', 'Productos de panadería', 12, 0),
@@ -435,15 +435,174 @@ function crearDatosDemo() {
     clientes,
     vehiculos,
     rutas: [
-      // Ruta de ejemplo ya despachada para el resumen del Dashboard (carga 45 de 60 uds.)
-      { id: 'R-001', fecha: fechaRelativa(0), vehiculoId: 'V001', vehiculo: 'GUA-123', pedidos: ['P-1004', 'P-1006'], distanciaKm: 7.2, tiempoMin: 38 }
+      // Rutas del día actual
+      {
+        id: 'R-001',
+        fecha: fechaRelativa(0),
+        vehiculoId: 'V001',
+        vehiculo: 'GUA-123',
+        pedidos: ['P-1004', 'P-1006'],
+        distanciaKm: 7.2,
+        tiempoMin: 38
+      },
+      {
+        id: 'R-002',
+        fecha: fechaRelativa(0),
+        vehiculoId: 'V013',
+        vehiculo: 'GUA-445',
+        pedidos: ['P-1028', 'P-1029', 'P-1030', 'P-1031'],
+        distanciaKm: 9.4,
+        tiempoMin: 52
+      },
+      {
+        id: 'R-003',
+        fecha: fechaRelativa(0),
+        vehiculoId: 'V003',
+        vehiculo: 'GUA-567',
+        pedidos: ['P-1008', 'P-1010', 'P-1011'],
+        distanciaKm: 12.6,
+        tiempoMin: 64
+      },
+      {
+        id: 'R-004',
+        fecha: fechaRelativa(0),
+        vehiculoId: 'V005',
+        vehiculo: 'GUA-234',
+        pedidos: ['P-1012', 'P-1013'],
+        distanciaKm: 5.8,
+        tiempoMin: 31
+      },
+      {
+        id: 'R-005',
+        fecha: fechaRelativa(0),
+        vehiculoId: 'V008',
+        vehiculo: 'GUA-678',
+        pedidos: ['P-1015', 'P-1016', 'P-1017'],
+        distanciaKm: 14.3,
+        tiempoMin: 73
+      },
+
+      // Rutas de días anteriores
+      {
+        id: 'R-006',
+        fecha: fechaRelativa(1),
+        vehiculoId: 'V002',
+        vehiculo: 'GUA-890',
+        pedidos: ['P-1001', 'P-1002'],
+        distanciaKm: 8.5,
+        tiempoMin: 42
+      },
+      {
+        id: 'R-007',
+        fecha: fechaRelativa(1),
+        vehiculoId: 'V006',
+        vehiculo: 'GUA-345',
+        pedidos: ['P-1018', 'P-1019', 'P-1020'],
+        distanciaKm: 11.7,
+        tiempoMin: 59
+      },
+      {
+        id: 'R-008',
+        fecha: fechaRelativa(2),
+        vehiculoId: 'V010',
+        vehiculo: 'GUA-456',
+        pedidos: ['P-1021', 'P-1022'],
+        distanciaKm: 6.4,
+        tiempoMin: 35
+      },
+      {
+        id: 'R-009',
+        fecha: fechaRelativa(2),
+        vehiculoId: 'V014',
+        vehiculo: 'GUA-789',
+        pedidos: ['P-1023', 'P-1024', 'P-1025'],
+        distanciaKm: 15.2,
+        tiempoMin: 78
+      },
+      {
+        id: 'R-010',
+        fecha: fechaRelativa(3),
+        vehiculoId: 'V004',
+        vehiculo: 'GUA-901',
+        pedidos: ['P-1026', 'P-1027'],
+        distanciaKm: 10.1,
+        tiempoMin: 49
+      }
     ],
+    
     actividad: [
-      { texto: 'Ruta R-001 despachada con GUA-123 (2 entregas)', ts: Date.now() - 20 * 60000, tipo: 'ruta' },
-      { texto: 'Pedido P-1002 completado',                       ts: Date.now() - 55 * 60000, tipo: 'ok' },
-      { texto: 'Nuevo pedido P-1009 registrado (Boutique Los Nogales)', ts: Date.now() - 2 * 3600000, tipo: 'nuevo' },
-      { texto: 'Vehículo GUA-901 en mantenimiento',              ts: Date.now() - 5 * 3600000, tipo: 'alerta' }
+      {
+        texto: 'Ruta R-001 despachada con GUA-123 (5 entregas)',
+        ts: Date.now() - 20 * 60000,
+        tipo: 'ruta'
+      },
+      {
+        texto: 'Pedido P-1002 completado',
+        ts: Date.now() - 55 * 60000,
+        tipo: 'ok'
+      },
+      {
+        texto: 'Nuevo pedido P-1009 registrado (Boutique Los Nogales)',
+        ts: Date.now() - 2 * 3600000,
+        tipo: 'nuevo'
+      },
+      {
+        texto: 'Vehículo GUA-901 en mantenimiento',
+        ts: Date.now() - 5 * 3600000,
+        tipo: 'alerta'
+      },
+      {
+        texto: 'Ruta R-002 despachada con GUA-445 (4 entregas)',
+        ts: Date.now() - 6 * 3600000,
+        tipo: 'ruta'
+      },
+      {
+        texto: 'Pedido P-1006 completado satisfactoriamente',
+        ts: Date.now() - 7 * 3600000,
+        tipo: 'ok'
+      },
+      {
+        texto: 'Nuevo pedido P-1032 registrado (Comercial La Guajira)',
+        ts: Date.now() - 8 * 3600000,
+        tipo: 'nuevo'
+      },
+      {
+        texto: 'Vehículo GUA-234 disponible para despacho',
+        ts: Date.now() - 10 * 3600000,
+        tipo: 'ok'
+      },
+      {
+        texto: 'Ruta R-003 finalizada (3 entregas realizadas)',
+        ts: Date.now() - 12 * 3600000,
+        tipo: 'ruta'
+      },
+      {
+        texto: 'Pedido P-1015 pendiente de confirmación',
+        ts: Date.now() - 15 * 3600000,
+        tipo: 'alerta'
+      },
+      {
+        texto: 'Nuevo pedido P-1033 registrado (Distribuidora del Norte)',
+        ts: Date.now() - 18 * 3600000,
+        tipo: 'nuevo'
+      },
+      {
+        texto: 'Ruta R-006 completada con 2 entregas',
+        ts: Date.now() - 24 * 3600000,
+        tipo: 'ruta'
+      },
+      {
+        texto: 'Pedido P-1020 marcado como completado',
+        ts: Date.now() - 28 * 3600000,
+        tipo: 'ok'
+      },
+      {
+        texto: 'Vehículo GUA-678 reportado como disponible',
+        ts: Date.now() - 32 * 3600000,
+        tipo: 'ok'
+      }
     ],
+
     config: {
       empresa: 'SmartRoute',
       administrador: 'Administrador',
@@ -459,6 +618,7 @@ function crearDatosDemo() {
 /* ---------- Persistencia ---------- */
 const Store = {
   datos: null,
+  _avisado: false,
 
   /* Carga desde localStorage o crea datos de demostración */
   cargar() {
@@ -466,6 +626,7 @@ const Store = {
       const guardado = localStorage.getItem(STORAGE_KEY);
       if (guardado) {
         this.datos = JSON.parse(guardado);
+        this.normalizar();
         return this.datos;
       }
     } catch (e) {
@@ -476,11 +637,30 @@ const Store = {
     return this.datos;
   },
 
+  /* Repara datos guardados incompletos para que la app no falle al cargarlos */
+  normalizar() {
+    const d = this.datos;
+    if (!d || typeof d !== 'object') { this.datos = crearDatosDemo(); return; }
+    const base = crearDatosDemo();
+    ['pedidos', 'clientes', 'vehiculos', 'rutas', 'actividad'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+    d.config = Object.assign({}, base.config, d.config || {});
+    d.pedidos.forEach(p => { p.cantidad = Number(p.cantidad) || 1; });
+    d.rutas.forEach(r => { if (!Array.isArray(r.pedidos)) r.pedidos = []; });
+  },
+
+  /* Guarda en localStorage y avisa si el almacenamiento del navegador está lleno */
   guardar() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.datos));
+      this._avisado = false;
+      return true;
     } catch (e) {
       console.warn('No se pudo guardar en localStorage.', e);
+      if (!this._avisado && typeof toast === 'function') {
+        this._avisado = true;
+        toast('No se pudo guardar: el almacenamiento del navegador está lleno. Descarga el CSV y restablece los datos.', 'error');
+      }
+      return false;
     }
   },
 
@@ -503,10 +683,10 @@ const Store = {
     return prefijo + sep + (prefijo === 'P' ? siguiente : String(siguiente).padStart(3, '0'));
   },
 
-  /* Registra una línea de actividad reciente (máximo 12) */
+  /* Registra una línea de actividad reciente (máximo 12).
+     No guarda por sí sola: cada acción llama a Store.guardar() una vez al terminar. */
   registrarActividad(texto, tipo) {
     this.datos.actividad.unshift({ texto, ts: Date.now(), tipo: tipo || 'info' });
     this.datos.actividad = this.datos.actividad.slice(0, 12);
-    this.guardar();
   }
 };

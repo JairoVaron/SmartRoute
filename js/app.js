@@ -6,8 +6,9 @@
 
 /* ---------- Constantes ---------- */
 const ESTADOS_PEDIDO = ['Pendiente', 'En ruta', 'Completado', 'Cancelado'];
-const ESTADOS_VEHICULO = ['Disponible', 'En ruta', 'En mantenimiento'];
+const ESTADOS_VEHICULO = ['Disponible', 'En ruta', 'En mantenimiento', 'Fuera de servicio'];
 const TIPOS_VEHICULO = ['Camión pequeño', 'Furgoneta', 'Camioneta', 'Motocarro', 'Motocicleta'];
+const PEDIDOS_POR_PAGINA = 100;
 
 /* ---------- Estado de la interfaz ---------- */
 const App = {
@@ -15,6 +16,7 @@ const App = {
   charts: [],
   q: { pedidos: '', clientes: '', vehiculos: '' },   // textos de búsqueda por módulo
   filtroEstado: '',                                  // filtro de estado en pedidos
+  maxPedidos: PEDIDOS_POR_PAGINA,                    // filas visibles en la tabla de pedidos
   plan: { sel: null, vehiculoId: '', resultado: null } // estado del planificador
 };
 
@@ -30,7 +32,7 @@ const esc = s => String(s === undefined || s === null ? '' : s)
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /* Normaliza texto para búsquedas (sin tildes ni mayúsculas) */
-const norm = s => String(s === undefined || s === null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const norm = s => String(s === undefined || s === null ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 const hoy = () => fechaRelativa(0);
 
@@ -59,7 +61,8 @@ const tiempoRelativo = ts => {
 
 const claseEstado = e => ({
   'Pendiente': 'est-pendiente', 'En ruta': 'est-ruta', 'Completado': 'est-completado',
-  'Cancelado': 'est-cancelado', 'Disponible': 'est-disponible', 'En mantenimiento': 'est-mantenimiento'
+  'Cancelado': 'est-cancelado', 'Disponible': 'est-disponible', 'En mantenimiento': 'est-mantenimiento',
+  'Fuera de servicio': 'est-cancelado'
 }[e] || '');
 
 const badgeEstado = e => `<span class="badge-estado ${claseEstado(e)}">${esc(e)}</span>`;
@@ -67,8 +70,11 @@ const badgeEstado = e => `<span class="badge-estado ${claseEstado(e)}">${esc(e)}
 const opciones = (lista, seleccionado) =>
   lista.map(o => `<option value="${esc(o)}" ${o === seleccionado ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
-const estadoSelect = (tipo, id, estado, lista) =>
-  `<select class="form-select form-select-sm estado-select ${claseEstado(estado)}" data-change="${tipo}" data-id="${esc(id)}" aria-label="Cambiar estado">${opciones(lista, estado)}</select>`;
+const estadoSelect = (tipo, id, estado, lista) => {
+  // Si el estado guardado no está en la lista, se agrega para no mostrar uno equivocado
+  const items = lista.includes(estado) || !estado ? lista : lista.concat(estado);
+  return `<select class="form-select form-select-sm estado-select ${claseEstado(estado)}" data-change="${tipo}" data-id="${esc(id)}" aria-label="Cambiar estado">${opciones(items, estado)}</select>`;
+};
 
 /* Acceso rápido a los datos */
 const D = () => Store.datos;
@@ -78,11 +84,12 @@ const buscarCliente = id => D().clientes.find(c => c.id === id);
 const buscarClientePorNombre = nombre => D().clientes.find(c => norm(c.nombre) === norm(nombre));
 const pedidosPendientes = () => D().pedidos.filter(p => p.estado === 'Pendiente');
 const vehiculosDisponibles = () => D().vehiculos.filter(v => v.estado === 'Disponible');
+const sectoresOrdenados = () => Object.keys(SECTORES).sort((a, b) => a.localeCompare(b, 'es'));
 
 /* ---------- Notificaciones (toasts) ---------- */
 function toast(mensaje, tipo = 'ok') {
   // Los mensajes de éxito/info pueden desactivarse en Configuración; los errores siempre se muestran
-  if ((tipo === 'ok' || tipo === 'info') && D() && D().config.notificaciones === false) return;
+  if ((tipo === 'ok' || tipo === 'info') && D() && D().config && D().config.notificaciones === false) return;
   const estilos = {
     ok:    { clase: 'text-bg-success', icono: 'bi-check-circle-fill' },
     error: { clase: 'text-bg-danger',  icono: 'bi-x-circle-fill' },
@@ -90,12 +97,17 @@ function toast(mensaje, tipo = 'ok') {
     warn:  { clase: 'text-bg-warning', icono: 'bi-exclamation-triangle-fill' }
   }[tipo] || { clase: 'text-bg-primary', icono: 'bi-info-circle-fill' };
 
+  const cont = $('#contenedorToasts');
+  if (!cont) return;
+  // Evita acumular muchos avisos a la vez
+  while (cont.children.length >= 4) cont.firstElementChild.remove();
+
   const el = document.createElement('div');
   el.className = `toast toast-sr align-items-center ${estilos.clase}`;
   el.setAttribute('role', 'alert');
   el.innerHTML = `<div class="d-flex"><div class="toast-body"><i class="bi ${estilos.icono} fs-5"></i><span>${esc(mensaje)}</span></div>
                   <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button></div>`;
-  $('#contenedorToasts').appendChild(el);
+  cont.appendChild(el);
   const t = new bootstrap.Toast(el, { delay: 3800 });
   el.addEventListener('hidden.bs.toast', () => el.remove());
   t.show();
@@ -126,14 +138,18 @@ const ModalGeneral = {
     const modal = bootstrap.Modal.getOrCreateInstance(el);
     const form = $('#formModal');
     if (form && onGuardar) {
+      let enviado = false; // evita registros duplicados por doble clic o doble Enter
       form.addEventListener('submit', ev => {
         ev.preventDefault();
+        if (enviado) return;
         if (!form.checkValidity()) {
           form.classList.add('was-validated');
           toast('Completa los campos obligatorios marcados en rojo.', 'error');
           return;
         }
+        enviado = true;
         if (onGuardar(form) !== false) modal.hide();
+        else enviado = false;
       });
     }
     if (alMostrar && form) alMostrar(form);
@@ -172,8 +188,14 @@ function etiquetaDia(iso) {
 function entregasPorDia() {
   const dias = [];
   for (let i = 6; i >= 0; i--) dias.push(fechaRelativa(-i));
-  const conteos = dias.map(d => D().pedidos.filter(p => p.estado === 'Completado' && (p.completado || p.fecha) === d).length);
-  return { labels: dias.map(etiquetaDia), conteos };
+  const cuenta = {};
+  D().pedidos.forEach(p => {
+    if (p.estado === 'Completado') {
+      const dia = p.completado || p.fecha;
+      cuenta[dia] = (cuenta[dia] || 0) + 1;
+    }
+  });
+  return { labels: dias.map(etiquetaDia), conteos: dias.map(d => cuenta[d] || 0) };
 }
 
 /* ---------- Estadísticas generales ---------- */
@@ -194,11 +216,19 @@ function calcularStats() {
   };
 }
 
-/* Carga (unidades) que lleva un vehículo en ruta actualmente */
-function cargaAsignada(v) {
-  if (v.estado !== 'En ruta') return 0;
-  const ids = new Set(D().rutas.filter(r => r.vehiculoId === v.id).flatMap(r => r.pedidos));
-  return D().pedidos.filter(p => ids.has(p.id) && p.estado === 'En ruta').reduce((s, p) => s + Number(p.cantidad), 0);
+/* Carga (unidades) que lleva cada vehículo en ruta, calculada en una sola pasada */
+function cargasPorVehiculo() {
+  const enRuta = new Map(D().pedidos.filter(p => p.estado === 'En ruta').map(p => [p.id, Number(p.cantidad)]));
+  const cargas = {};
+  const vistos = new Set();
+  D().rutas.forEach(r => r.pedidos.forEach(id => {
+    const clave = r.vehiculoId + '|' + id;
+    if (enRuta.has(id) && !vistos.has(clave)) {
+      vistos.add(clave);
+      cargas[r.vehiculoId] = (cargas[r.vehiculoId] || 0) + enRuta.get(id);
+    }
+  }));
+  return cargas;
 }
 
 /* ==========================================================================
@@ -217,6 +247,7 @@ const SECCIONES = {
 function navegar(seccion) {
   if (!SECCIONES[seccion]) seccion = 'dashboard';
   App.seccion = seccion;
+  App.maxPedidos = PEDIDOS_POR_PAGINA;
 
   // Menú lateral y título
   $$('.nav-item-sr').forEach(a => a.classList.toggle('active', a.dataset.seccion === seccion));
@@ -234,14 +265,16 @@ function navegar(seccion) {
   window.scrollTo({ top: 0 });
 }
 
-/* Dibuja la sección actual (también se usa para refrescar tras un cambio) */
+/* Dibuja la sección actual (también se usa para refrescar tras un cambio, conservando el scroll) */
 function renderSeccion() {
+  const y = window.scrollY;
   destruirGraficas();
   Rutas.destruirMapa();
   const sec = SECCIONES[App.seccion];
   $('#contenido').innerHTML = sec.render();
   if (sec.despues) sec.despues();
   actualizarMarco();
+  window.scrollTo({ top: y });
 }
 
 /* Actualiza elementos comunes: insignias, notificaciones y usuario */
@@ -346,7 +379,6 @@ function renderDashboard() {
       </div>
       <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-light" data-action="ir" data-id="rutas"><i class="bi bi-signpost-split-fill me-1"></i>Planificar una ruta</button>
-        <button class="btn btn-outline-light" data-action="restablecer"><i class="bi bi-arrow-counterclockwise me-1"></i>Restablecer datos de demostración</button>
       </div>
     </div>
 
@@ -418,19 +450,21 @@ function renderPedidos() {
   </section>`;
 }
 
+const numeroDeId = p => parseInt(String(p.id).replace(/\D/g, ''), 10) || 0;
+
 function pedidosFiltrados() {
   const q = norm(App.q.pedidos);
-  const num = p => parseInt(String(p.id).replace(/\D/g, ''), 10) || 0;
   return D().pedidos
     .filter(p => (!App.filtroEstado || p.estado === App.filtroEstado) &&
       (!q || norm([p.id, p.cliente, p.direccion, p.sector, p.producto, p.estado].join(' ')).includes(q)))
-    .sort((a, b) => num(b) - num(a));
+    .sort((a, b) => numeroDeId(b) - numeroDeId(a));
 }
 
 function pintarTablaPedidos() {
   const cont = $('#tablaPedidos');
   if (!cont) return;
   const lista = pedidosFiltrados();
+  const visibles = lista.slice(0, App.maxPedidos);
   $('#contadorPedidos').textContent = `${lista.length} de ${D().pedidos.length} pedidos`;
   if (!lista.length) {
     cont.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i>No se encontraron pedidos con esos criterios.</div>';
@@ -439,7 +473,7 @@ function pintarTablaPedidos() {
   cont.innerHTML = `
     <table class="table table-sr">
       <thead><tr><th>Código</th><th>Cliente</th><th>Dirección</th><th>Sector</th><th>Producto</th><th>Cant.</th><th>Estado</th><th>Entrega</th><th class="text-end">Acciones</th></tr></thead>
-      <tbody>${lista.map(p => `
+      <tbody>${visibles.map(p => `
         <tr>
           <td class="code-tag">${esc(p.id)}</td>
           <td class="fw-semibold">${esc(p.cliente)}</td>
@@ -455,12 +489,13 @@ function pintarTablaPedidos() {
           </td>
         </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${lista.length > visibles.length ? `<div class="text-center p-3"><button class="btn btn-soft btn-sm" data-action="mas-pedidos">Mostrar más (${lista.length - visibles.length} restantes)</button></div>` : ''}`;
 }
 
 function formPedidoHtml(p) {
   p = p || {};
-  const sectores = Object.keys(SECTORES);
+  const sectores = sectoresOrdenados();
   return `
   <form id="formModal" novalidate>
     <div class="row g-3">
@@ -546,7 +581,7 @@ function guardarPedido(form, existente) {
     cliente = {
       id: Store.siguienteId('clientes', 'C', 0),
       nombre: datos.cliente,
-      telefono: '300 000 0' + (100 + D().clientes.length + 1),
+      telefono: '300 000 ' + String(1000 + D().clientes.length + 1).slice(-4),
       direccion: datos.direccion,
       sector: datos.sector
     };
@@ -571,6 +606,22 @@ function guardarPedido(form, existente) {
   return true;
 }
 
+/* Rutas guardadas que incluyen un pedido y vehículos que las atienden */
+const vehiculosDeRutasConPedido = id => new Set(D().rutas.filter(r => r.pedidos.includes(id)).map(r => r.vehiculoId));
+
+/* Si un vehículo ya no tiene entregas "En ruta", vuelve a quedar disponible */
+function liberarVehiculos(ids) {
+  const enRuta = new Set(D().pedidos.filter(p => p.estado === 'En ruta').map(p => p.id));
+  const ocupados = new Set();
+  D().rutas.forEach(r => { if (r.pedidos.some(id => enRuta.has(id))) ocupados.add(r.vehiculoId); });
+  D().vehiculos.forEach(v => {
+    if (ids.has(v.id) && v.estado === 'En ruta' && !ocupados.has(v.id)) {
+      v.estado = 'Disponible';
+      Store.registrarActividad(`Vehículo ${v.placa} quedó disponible (sin entregas en ruta)`, 'ok');
+    }
+  });
+}
+
 function cambiarEstadoPedido(id, nuevo) {
   const p = buscarPedido(id);
   if (!p || p.estado === nuevo) return;
@@ -578,6 +629,7 @@ function cambiarEstadoPedido(id, nuevo) {
   if (nuevo === 'Completado') p.completado = hoy(); else delete p.completado;
   const tipo = { 'Completado': 'ok', 'En ruta': 'ruta', 'Cancelado': 'alerta', 'Pendiente': 'info' }[nuevo];
   Store.registrarActividad(`Pedido ${p.id} cambió a "${nuevo}"`, tipo);
+  liberarVehiculos(vehiculosDeRutasConPedido(id));
   Store.guardar();
   toast(`Pedido ${p.id}: estado actualizado a "${nuevo}".`);
   renderSeccion();
@@ -590,10 +642,12 @@ function eliminarPedido(id) {
     titulo: '¿Eliminar pedido?',
     mensaje: `Se eliminará el pedido ${p.id} de ${p.cliente}. Esta acción no se puede deshacer.`,
     onOk: () => {
+      const afectados = vehiculosDeRutasConPedido(id);
       D().pedidos = D().pedidos.filter(x => x.id !== id);
       // Se retira de las rutas guardadas
       D().rutas.forEach(r => { r.pedidos = r.pedidos.filter(x => x !== id); });
       D().rutas = D().rutas.filter(r => r.pedidos.length > 0);
+      liberarVehiculos(afectados);
       Store.registrarActividad(`Pedido ${id} eliminado`, 'alerta');
       Store.guardar();
       toast(`Pedido ${id} eliminado.`, 'warn');
@@ -649,7 +703,6 @@ function renderPlanificador() {
   <section>
     <div class="page-head">
       <div><h2>Planificador de rutas</h2><p>Selecciona pedidos y un vehículo para generar una ruta de entrega demostrativa.</p></div>
-      <span class="badge-estado est-pendiente">Simulación demostrativa</span>
     </div>
 
     <div class="planner-grid">
@@ -737,7 +790,8 @@ function generarRuta(btn) {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Simulando planificación...';
   setTimeout(async () => {
     // Intenta trazar el recorrido por calles (servicio público OSRM). Si falla, se usa la estimación en línea recta.
-    const calles = await Rutas.rutaPorCalles(prueba);
+    let calles = null;
+    try { calles = await Rutas.rutaPorCalles(prueba); } catch (e) { calles = null; }
     if (App.seccion !== 'rutas' || !document.body.contains(btn)) return;
     btn.disabled = false;
     btn.innerHTML = textoOriginal;
@@ -768,7 +822,7 @@ function tarjetaResultado(r) {
 
   return `
   <div class="card-sr">
-    <div class="card-head"><h3>Resultado de la ruta</h3><span class="badge-estado est-pendiente">Demostrativo</span></div>
+    <div class="card-head"><h3>Resultado de la ruta</h3></div>
     <div class="card-body-sr">
       <div class="row g-3 mb-3">
         <div class="col-6 col-md-3"><div class="result-stat"><div class="v">${r.orden.length}</div><div class="l">Pedidos incluidos</div></div></div>
@@ -779,9 +833,6 @@ function tarjetaResultado(r) {
       <div class="small text-muted mb-3"><i class="bi bi-truck me-1"></i>${esc(v.modelo)} · ${esc(v.conductor)} · Carga ${r.carga}/${v.capacidad} uds. · Sale y regresa a la bodega.</div>
       <h6 class="fw-bold mb-1">Orden sugerido de entregas</h6>
       <ol class="stop-list mb-3">${paradas}</ol>
-      <div class="demo-note mb-3"><i class="bi bi-info-circle-fill"></i>
-        <div>Resultado demostrativo. El orden se obtiene con una heurística sencilla de vecino más cercano sobre ubicaciones aproximadas por barrio; no es una ruta óptima.
-          ${r.calles ? 'Solo el trazado por calles, la distancia y el tiempo de conducción provienen del servicio público de rutas OSRM.' : 'La distancia y el tiempo son estimaciones sobre línea recta (no se pudo consultar el trazado por calles).'}</div></div>
       <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-primary" data-action="despachar-ruta"><i class="bi bi-send-check-fill me-1"></i>Confirmar y despachar ruta</button>
         <button class="btn btn-light" data-action="limpiar-ruta">Descartar</button>
@@ -795,6 +846,7 @@ function despacharRuta() {
   if (!r) return;
   const v = buscarVehiculo(r.vehiculo.id);
   if (!v) { toast('El vehículo ya no existe.', 'error'); return; }
+  if (v.estado !== 'Disponible') { toast(`El vehículo ${v.placa} ya no está disponible.`, 'error'); return; }
 
   r.orden.forEach(pt => { const p = buscarPedido(pt.pedido.id); if (p) p.estado = 'En ruta'; });
   v.estado = 'En ruta';
@@ -846,8 +898,9 @@ function pintarVehiculos() {
     cont.innerHTML = '<div class="col-12"><div class="card-sr"><div class="empty-state"><i class="bi bi-truck"></i>No se encontraron vehículos.</div></div></div>';
     return;
   }
+  const cargas = cargasPorVehiculo();
   cont.innerHTML = lista.map(v => {
-    const carga = cargaAsignada(v);
+    const carga = v.estado === 'En ruta' ? (cargas[v.id] || 0) : 0;
     const pct = v.capacidad ? Math.min(100, Math.round((carga / v.capacidad) * 100)) : 0;
     return `
     <div class="col-md-6 col-xl-4">
@@ -905,7 +958,7 @@ function formVehiculoHtml(v) {
       </div>
       <div class="col-md-7">
         <label class="form-label" for="vCond">Conductor asignado</label>
-        <input id="vCond" name="conductor" class="form-control" required maxlength="60" value="${esc(v.conductor)}" placeholder="Nombre ficticio">
+        <input id="vCond" name="conductor" class="form-control" required maxlength="60" value="${esc(v.conductor)}" placeholder="Nombre">
         <div class="invalid-feedback">Indica el conductor.</div>
       </div>
       <div class="col-md-5">
@@ -957,7 +1010,7 @@ function cambiarEstadoVehiculo(id, nuevo) {
   const v = buscarVehiculo(id);
   if (!v || v.estado === nuevo) return;
   v.estado = nuevo;
-  Store.registrarActividad(`Vehículo ${v.placa} cambió a "${nuevo}"`, nuevo === 'En mantenimiento' ? 'alerta' : 'info');
+  Store.registrarActividad(`Vehículo ${v.placa} cambió a "${nuevo}"`, (nuevo === 'En mantenimiento' || nuevo === 'Fuera de servicio') ? 'alerta' : 'info');
   Store.guardar();
   toast(`Vehículo ${v.placa}: estado actualizado a "${nuevo}".`);
   renderSeccion();
@@ -988,6 +1041,17 @@ function eliminarVehiculo(id) {
    ========================================================================== */
 const pedidosDeCliente = c => D().pedidos.filter(p => p.clienteId === c.id || norm(p.cliente) === norm(c.nombre));
 
+/* Cantidad de pedidos por cliente calculada en una sola pasada (rápido con muchos datos) */
+function conteoPedidosPorCliente() {
+  const idPorNombre = new Map(D().clientes.map(c => [norm(c.nombre), c.id]));
+  const cuenta = {};
+  D().pedidos.forEach(p => {
+    const id = p.clienteId || idPorNombre.get(norm(p.cliente));
+    if (id) cuenta[id] = (cuenta[id] || 0) + 1;
+  });
+  return cuenta;
+}
+
 function renderClientes() {
   return `
   <section>
@@ -1015,6 +1079,7 @@ function pintarTablaClientes() {
     cont.innerHTML = '<div class="empty-state"><i class="bi bi-people"></i>No se encontraron clientes.</div>';
     return;
   }
+  const conteo = conteoPedidosPorCliente();
   cont.innerHTML = `
     <table class="table table-sr">
       <thead><tr><th>Nombre</th><th>Teléfono</th><th>Dirección</th><th>Sector</th><th>Pedidos</th><th class="text-end">Acciones</th></tr></thead>
@@ -1024,7 +1089,7 @@ function pintarTablaClientes() {
           <td class="text-nowrap">${esc(c.telefono)}</td>
           <td>${esc(c.direccion)}</td>
           <td>${esc(c.sector)}</td>
-          <td><span class="badge text-bg-light border">${pedidosDeCliente(c).length}</span></td>
+          <td><span class="badge text-bg-light border">${conteo[c.id] || 0}</span></td>
           <td class="text-end text-nowrap">
             <button class="btn-action" title="Ver pedidos" data-action="pedidos-cliente" data-id="${esc(c.id)}"><i class="bi bi-box-seam"></i></button>
             <button class="btn-action" title="Editar" data-action="editar-cliente" data-id="${esc(c.id)}"><i class="bi bi-pencil-fill"></i></button>
@@ -1046,13 +1111,13 @@ function formClienteHtml(c) {
         <div class="invalid-feedback">Indica el nombre.</div>
       </div>
       <div class="col-md-6">
-        <label class="form-label" for="cTel">Teléfono (ficticio)</label>
+        <label class="form-label" for="cTel">Teléfono</label>
         <input id="cTel" name="telefono" class="form-control" required pattern="[0-9 +\\-]{7,20}" value="${esc(c.telefono)}" placeholder="300 000 0000">
         <div class="invalid-feedback">Ingresa un teléfono válido (solo números, espacios, + o -).</div>
       </div>
       <div class="col-md-6">
         <label class="form-label" for="cSector">Barrio o sector</label>
-        <select id="cSector" name="sector" class="form-select" required><option value="">Selecciona...</option>${opciones(Object.keys(SECTORES), c.sector)}</select>
+        <select id="cSector" name="sector" class="form-select" required><option value="">Selecciona...</option>${opciones(sectoresOrdenados(), c.sector)}</select>
         <div class="invalid-feedback">Selecciona un sector.</div>
       </div>
       <div class="col-12">
@@ -1201,14 +1266,18 @@ function despuesReportes() {
       scales: { y: { beginAtZero: true, ticks: { precision: 0, stepSize: 1 }, grid: { color: '#EEF2F9' } }, x: { grid: { display: false } } } }
   });
 
-  // Pedidos por barrio (datos reales de los registros guardados)
+  // Pedidos por barrio (datos reales de los registros guardados), de mayor a menor
   const porBarrio = {};
   D().pedidos.forEach(p => { porBarrio[p.sector] = (porBarrio[p.sector] || 0) + 1; });
+  const barrios = Object.entries(porBarrio).sort((a, b) => b[1] - a[1]);
+  const canvasBarrios = document.getElementById('graficaReporteBarrios');
+  // La altura crece con la cantidad de barrios para que las etiquetas no se amontonen
+  if (canvasBarrios && canvasBarrios.parentElement) canvasBarrios.parentElement.style.height = Math.max(240, barrios.length * 26) + 'px';
   crearGrafica('graficaReporteBarrios', {
     type: 'bar',
-    data: { labels: Object.keys(porBarrio), datasets: [{ label: 'Pedidos', data: Object.values(porBarrio), backgroundColor: '#16A34A', borderRadius: 8, maxBarThickness: 30 }] },
+    data: { labels: barrios.map(b => b[0]), datasets: [{ label: 'Pedidos', data: barrios.map(b => b[1]), backgroundColor: '#16A34A', borderRadius: 8, maxBarThickness: 30 }] },
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { precision: 0, stepSize: 1 }, grid: { color: '#EEF2F9' } }, y: { grid: { display: false } } } }
+      scales: { x: { beginAtZero: true, ticks: { precision: 0, stepSize: 1 }, grid: { color: '#EEF2F9' } }, y: { grid: { display: false }, ticks: { autoSkip: false } } } }
   });
 }
 
@@ -1246,7 +1315,7 @@ function exportarCSV() {
   D().vehiculos.forEach(v => filas.push([v.placa, v.modelo, v.tipo, v.capacidad, v.conductor, v.estado]));
 
   // BOM + separador ";" para que Excel en español abra bien las columnas
-  const csv = '﻿' + filas.map(f => f.map(celdaCSV).join(';')).join('\r\n');
+  const csv = '\uFEFF' + filas.map(f => f.map(celdaCSV).join(';')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1278,7 +1347,7 @@ function renderConfiguracion() {
                   <input id="cfEmpresa" name="empresa" class="form-control" required maxlength="60" value="${esc(c.empresa)}"><div class="invalid-feedback">Indica el nombre de la empresa.</div></div>
                 <div class="col-md-6"><label class="form-label" for="cfAdmin">Nombre del administrador</label>
                   <input id="cfAdmin" name="administrador" class="form-control" required maxlength="60" value="${esc(c.administrador)}"><div class="invalid-feedback">Indica el nombre del administrador.</div></div>
-                <div class="col-md-6"><label class="form-label" for="cfCorreo">Correo electrónico (ficticio)</label>
+                <div class="col-md-6"><label class="form-label" for="cfCorreo">Correo electrónico</label>
                   <input id="cfCorreo" name="correo" type="email" class="form-control" required value="${esc(c.correo)}"><div class="invalid-feedback">Ingresa un correo válido.</div></div>
                 <div class="col-md-6"><label class="form-label" for="cfCiudad">Ciudad</label>
                   <input id="cfCiudad" name="ciudad" class="form-control" required maxlength="60" value="${esc(c.ciudad)}"><div class="invalid-feedback">Indica la ciudad.</div></div>
@@ -1377,6 +1446,7 @@ function restablecerDatos() {
       App.plan = { sel: null, vehiculoId: '', resultado: null };
       App.q = { pedidos: '', clientes: '', vehiculos: '' };
       App.filtroEstado = '';
+      App.maxPedidos = PEDIDOS_POR_PAGINA;
       $('#buscadorGlobal').value = '';
       toast('Datos de demostración restablecidos.', 'info');
       renderSeccion();
@@ -1392,6 +1462,7 @@ const ACCIONES = {
   'nuevo-pedido':      () => abrirFormPedido(),
   'editar-pedido':     id => abrirFormPedido(id),
   'eliminar-pedido':   id => eliminarPedido(id),
+  'mas-pedidos':       () => { App.maxPedidos += PEDIDOS_POR_PAGINA; pintarTablaPedidos(); },
   'nuevo-vehiculo':    () => abrirFormVehiculo(),
   'editar-vehiculo':   id => abrirFormVehiculo(id),
   'eliminar-vehiculo': id => eliminarVehiculo(id),
@@ -1423,7 +1494,7 @@ const ACCIONES = {
 const CAMBIOS = {
   'estado-pedido':   (id, el) => cambiarEstadoPedido(id, el.value),
   'estado-vehiculo': (id, el) => cambiarEstadoVehiculo(id, el.value),
-  'filtro-estado':   (id, el) => { App.filtroEstado = el.value; pintarTablaPedidos(); },
+  'filtro-estado':   (id, el) => { App.filtroEstado = el.value; App.maxPedidos = PEDIDOS_POR_PAGINA; pintarTablaPedidos(); },
   'plan-vehiculo':   (id, el) => { App.plan.vehiculoId = el.value; actualizarCarga(); },
   'plan-check':      (id, el) => {
     if (el.checked) App.plan.sel.add(id); else App.plan.sel.delete(id);
@@ -1437,6 +1508,7 @@ function aplicarBusqueda(valor) {
   const sec = App.seccion;
   if (!(sec in App.q)) return;
   App.q[sec] = valor;
+  App.maxPedidos = PEDIDOS_POR_PAGINA;
   $('#buscadorGlobal').value = valor;
   const local = { pedidos: '#buscarPedidos', clientes: '#buscarClientes', vehiculos: '#buscarVehiculos' }[sec];
   const campo = local && $(local);
