@@ -1318,11 +1318,25 @@ function renderConfiguracion() {
           <div class="card-head"><h3>Planes propuestos</h3></div>
           <div class="card-body-sr">
             <div class="row g-3">
-              <div class="col-6"><div class="plan-card"><div class="small text-muted fw-semibold">Plan básico</div><div class="plan-price">${fmtCOP(59900)}</div><div class="small text-muted">al mes</div><div class="small mt-2">Hasta 3 vehículos y 100 pedidos mensuales.</div></div></div>
-              <div class="col-6"><div class="plan-card featured"><div class="small text-muted fw-semibold">Plan empresarial</div><div class="plan-price">${fmtCOP(99900)}</div><div class="small text-muted">al mes</div><div class="small mt-2">Vehículos y pedidos sin límite.</div></div></div>
+              <div class="col-6">
+                <div class="plan-card">
+                  <div class="small text-muted fw-semibold">Plan básico</div>
+                  <div class="plan-price">${fmtCOP(49900)}</div>
+                  <div class="small text-muted">al mes</div>
+                  <div class="small mt-2">Hasta 3 vehículos y 100 pedidos mensuales.</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="plan-card featured">
+                  <div class="small text-muted fw-semibold">Plan estándar</div>
+                  <div class="plan-price">${fmtCOP(79900)}</div>
+                  <div class="small text-muted">al mes</div>
+                  <div class="small mt-2">Vehículos y pedidos sin límite.</div>
+                </div>
+              </div>
             </div>
             <ul class="small text-muted mt-3 mb-0 ps-3">
-              <li>Implementación inicial: desde ${fmtCOP(150000)}.</li>
+              <li>Implementación inicial: desde ${fmtCOP(100000)}.</li>
               <li>Soporte personalizado: según el servicio.</li>
             </ul>
             <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Propuesta de emprendimiento universitario; SmartRoute es un prototipo demostrativo, no una plataforma comercial desplegada.</div>
